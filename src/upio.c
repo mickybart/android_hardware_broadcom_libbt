@@ -199,6 +199,36 @@ static void proc_btwrite_timeout(union sigval arg)
     upio_set(UPIO_BT_WAKE, UPIO_DEASSERT, 1);
 }
 
+/*******************************************************************************
+**
+** Function        upio_create_timer
+**
+** Description     create timer, caller must check lpm_proc_cb.timer_created
+**                 before calling this function
+**
+** Returns         None
+**
+*******************************************************************************/
+static void upio_create_timer() {
+    int status;
+    struct sigevent se;
+
+    se.sigev_notify = SIGEV_THREAD;
+    se.sigev_value.sival_ptr = &lpm_proc_cb.timer_id;
+    se.sigev_notify_function = proc_btwrite_timeout;
+    se.sigev_notify_attributes = NULL;
+
+    status = timer_create(CLOCK_MONOTONIC, &se,
+                            &lpm_proc_cb.timer_id);
+
+    if (status == 0) {
+        lpm_proc_cb.timer_created = TRUE;
+        UPIODBG("%s : timer_create success", __FUNCTION__);
+    } else {
+        UPIODBG("%s : timer_create failed", __FUNCTION__);
+    }
+}
+
 /******************************************************************************
  **
  ** Function      upio_start_stop_timer
@@ -211,14 +241,15 @@ static void proc_btwrite_timeout(union sigval arg)
 void upio_start_stop_timer(int action) {
     struct itimerspec ts;
 
+    if (lpm_proc_cb.timer_created == FALSE) {
+        upio_create_timer();
+    }
     if (action == UPIO_ASSERT) {
         lpm_proc_cb.btwrite_active = TRUE;
-        if (lpm_proc_cb.timer_created == TRUE) {
-            ts.it_value.tv_sec = PROC_BTWRITE_TIMER_TIMEOUT_MS/1000;
-            ts.it_value.tv_nsec = 1000000*(PROC_BTWRITE_TIMER_TIMEOUT_MS%1000);
-            ts.it_interval.tv_sec = 0;
-            ts.it_interval.tv_nsec = 0;
-        }
+        ts.it_value.tv_sec = PROC_BTWRITE_TIMER_TIMEOUT_MS/1000;
+        ts.it_value.tv_nsec = 1000000*(PROC_BTWRITE_TIMER_TIMEOUT_MS%1000);
+        ts.it_interval.tv_sec = 0;
+        ts.it_interval.tv_nsec = 0;
     } else {
         /* unarm timer if writing 0 to lpm; reduce unnecessary user space wakeup */
         memset(&ts, 0, sizeof(ts));
@@ -417,19 +448,7 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
                     // create btwrite assertion holding timer
                     if (lpm_proc_cb.timer_created == FALSE)
                     {
-                        int status;
-                        struct sigevent se;
-
-                        se.sigev_notify = SIGEV_THREAD;
-                        se.sigev_value.sival_ptr = &lpm_proc_cb.timer_id;
-                        se.sigev_notify_function = proc_btwrite_timeout;
-                        se.sigev_notify_attributes = NULL;
-
-                        status = timer_create(CLOCK_MONOTONIC, &se,
-                                                &lpm_proc_cb.timer_id);
-
-                        if (status == 0)
-                            lpm_proc_cb.timer_created = TRUE;
+                        upio_create_timer();
                     }
                 }
             }
